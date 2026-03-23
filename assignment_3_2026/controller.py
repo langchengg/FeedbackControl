@@ -3,22 +3,28 @@
 # ============================================================================
 # Architecture Overview:
 #   1. Outer Loop (Position PID): computes desired velocity from position error.
-#   2. Inner Loop (Velocity PID): feedforward desired velocity + small feedback
-#                                 correction based on tracking error.
+#   2. Inner Loop (Velocity PID): feedforward desired velocity plus an
+#      optional feedback correction based on tracking error.
 #   3. Disturbance Observer (DOBC) [ADVANCED METHOD]:
 #      Estimates low-frequency unmodeled dynamics and wind disturbances by
 #      acting as a low-pass filter on the velocity discrepancy (v_act - v_cmd).
 #      The DOBC dynamically estimates the wind-induced velocity bias in the 
 #      WORLD frame and allows for active or passive compensation.
 #
+# Final tuned gains used in this file:
+#   - Position PID: KP=2.4, KI=2.0, KD=0.9
+#   - Velocity correction PID: KP=0.0, KI=0.0, KD=0.0
+#   - Yaw PID: KP=2.4, KI=0.0, KD=0.1
+#
 # IMPORTANT DESIGN NOTE (Inner Loop Integration):
-#   The simulator's built-in tello_controller already handles attitude/rate/motor
-#   control at 1000 Hz, and internally contains its OWN velocity PID (KP=7, KI=0.6,
-#   KD=0.2). Our inner velocity loop must NOT duplicate this functionality.
+#   The simulator's `src/tello_controller.py` already handles velocity,
+#   attitude, rate, and motor control at 1000 Hz. Its internal velocity PID is
+#   `PIDController(7, 0.6, 0.2, [10, 10, 10])`.
+#   Our outer controller must NOT duplicate that aggressive inner velocity loop.
 #   Instead, we use a feedforward + feedback architecture:
 #     cmd_vel = desired_vel + small_PID_correction(vel_error)
-#   This passes the desired velocity through directly (feedforward) while the
-#   inner PID only adds minor damping corrections.
+#   In the final tuned submission, that correction path is kept in the code but
+#   its gains are set to zero, so the command is effectively feedforward.
 #
 # DOBC Integration & Grading Criteria Note:
 #   - Advanced Method: Disturbance Observer-Based Controller (DOBC) is fully
@@ -47,7 +53,6 @@
 # ============================================================================
 
 import numpy as np
-import time
 
 # ─── Data Logger ────────────────────────────────────────────────────────────
 class DataLogger:
@@ -55,7 +60,7 @@ class DataLogger:
     def __init__(self, filename="flight_log.csv"):
         self.filename = filename
         self.file = None
-        self.start_time = None
+        self.sim_time = 0.0
 
     def _open(self):
         self.file = open(self.filename, "w")
@@ -65,14 +70,13 @@ class DataLogger:
             "error_x,error_y,error_z,error_yaw,"
             "cmd_vx,cmd_vy,cmd_vz,cmd_yaw_rate\n"
         )
-        self.start_time = time.time()
+        self.sim_time = 0.0
 
-    def log(self, state, target, error_world, cmd):
+    def log(self, state, target, error_world, cmd, dt):
         if self.file is None:
             self._open()
-        t = time.time() - self.start_time
         row = (
-            f"{t:.4f},"
+            f"{self.sim_time:.4f},"
             f"{state[0]:.6f},{state[1]:.6f},{state[2]:.6f},{state[5]:.6f},"
             f"{target[0]:.6f},{target[1]:.6f},{target[2]:.6f},{target[3]:.6f},"
             f"{error_world[0]:.6f},{error_world[1]:.6f},{error_world[2]:.6f},{error_world[3]:.6f},"
@@ -80,6 +84,7 @@ class DataLogger:
         )
         self.file.write(row)
         self.file.flush()
+        self.sim_time += dt
 
 logger = DataLogger()
 
@@ -151,22 +156,22 @@ dobc = DisturbanceObserver(alpha=0.005)
 # Layer 1 – Outer Loop (Position → Desired Velocity)
 #   Maps position error to a velocity setpoint. Moderate KP for smooth approach,
 #   small KI to eliminate steady-state error, moderate KD for damping.
-POS_KP = 3.0
-POS_KI = 2.5
-POS_KD = 1.2
+POS_KP = 2.4
+POS_KI = 2.0
+POS_KD = 0.9
 
 
 # Layer 2 – Inner Loop (Velocity feedback correction)
-#   Uses feedforward architecture: cmd = desired_vel + PID_correction(vel_error)
-#   Gains are kept VERY SMALL because tello_controller already tracks velocity.
-#   The inner PID only provides minor damping/correction.
+#   The correction path is intentionally disabled in the final tuning because
+#   the simulator's built-in Tello velocity loop already tracks our command.
+#   We keep the structure in code for clarity and possible future retuning.
 VEL_KP = 0.0
 VEL_KI = 0.0
 VEL_KD = 0.0
 
 # Yaw Controller
-YAW_KP = 2.0
-YAW_KI = 0.05
+YAW_KP = 2.4
+YAW_KI = 0.0
 YAW_KD = 0.1
 
 # ─── Instantiate PIDs ──────────────────────────────────────────────────────
@@ -310,6 +315,7 @@ def controller(state, target_pos, dt, wind_enabled=False):
     yaw_err_logged = wrap_angle(target_yaw - yaw)
     logger.log(state, target_pos,
                [error_world[0], error_world[1], error_world[2], yaw_err_logged],
-               [cmd_vx, cmd_vy, cmd_vz, cmd_yaw_rate])
+               [cmd_vx, cmd_vy, cmd_vz, cmd_yaw_rate],
+               dt)
 
     return (cmd_vx, cmd_vy, cmd_vz, cmd_yaw_rate)
