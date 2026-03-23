@@ -7,7 +7,7 @@
 
 ## 1. 控制器文件位置
 
-- 主控制器：`/home/runner/work/FeedbackControl/FeedbackControl/assignment_3_2026/controller.py`
+- 主控制器：`assignment_3_2026/controller.py`
 - 底层飞控（已存在，不需重复实现）：`assignment_3_2026/src/tello_controller.py`
 - 仿真入口：`assignment_3_2026/run.py`
 
@@ -53,7 +53,7 @@ controller(state, target_pos, dt, wind_enabled=False)
   `[pos_x, pos_y, pos_z, roll, pitch, yaw]`（世界系姿态角）
 - `target_pos`：长度为 4 的目标  
   `(target_x, target_y, target_z, target_yaw)`
-- `dt`：控制步长（`run.py` 中约为 `1/50 s`）
+- `dt`：控制步长（`run.py` 中位置控制频率为 `50 Hz`，即 `0.02 s`）
 - `wind_enabled`：是否启用风扰标志
 
 ### 输出
@@ -101,8 +101,9 @@ controller(state, target_pos, dt, wind_enabled=False)
 
 ### DOBC
 
-- `alpha = 0.005`（低通更新系数）
+- `alpha = 0.005`（低通 EMA 平滑系数；越小越平滑、响应越慢）
 - 估计量 `d_hat` 限幅：`[-1.0, 1.0]`
+- 风补偿缩放：`0.0`（当前禁用主动补偿，仅保留扰动估计）
 
 ---
 
@@ -114,7 +115,7 @@ controller(state, target_pos, dt, wind_enabled=False)
 2. 计算世界系位置误差；
 3. 将误差旋转到偏航对齐机体系；
 4. 外环 PID 生成期望速度；
-5. 由位置差分 + EMA 估计当前速度；
+5. 由位置差分 + EMA（Exponential Moving Average，指数滑动平均）估计当前速度；
 6. 更新 DOBC 并得到风扰估计；
 7. 计算速度误差并做内环修正（前馈 + 小反馈）；
 8. 计算偏航角速度；
@@ -138,7 +139,7 @@ controller(state, target_pos, dt, wind_enabled=False)
 在仓库根目录执行：
 
 ```bash
-cd /home/runner/work/FeedbackControl/FeedbackControl/assignment_3_2026
+cd assignment_3_2026
 python run.py
 ```
 
@@ -173,4 +174,3 @@ python run.py
 2. 内环小增益从 0 开始，仅在必要时增加少量阻尼校正；
 3. 风扰场景先观察 DOBC 估计稳定性，再决定是否引入主动补偿比例；
 4. 每次改动后结合 `flight_log.csv` 评估过冲、收敛时间和稳态误差。
-
